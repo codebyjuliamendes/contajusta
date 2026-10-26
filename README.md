@@ -73,11 +73,18 @@ test/                # testes de domínio e de integração da API
 - O esquema do banco evolui por migrações numeradas em `src/db.js`; bancos criados pela versão anterior são atualizados automaticamente.
 - A API responde erros sempre em JSON (inclusive JSON malformado) e envia cabeçalhos de segurança, incluindo Content-Security-Policy sem `unsafe-inline`.
 
+## Acesso e convites
+
+Cada grupo recebe uma chave aleatória de 128 bits e fica em `/g/<chave>`. O botão **Convidar** copia ou compartilha esse link; ao abri-lo, o grupo é lembrado no dispositivo (localStorage). A API não lista grupos de terceiros e IDs sequenciais não são aceitos nas rotas.
+
 ## API
 
 - `GET /api/health` — verificação de saúde (inclui acesso ao banco).
-- `GET /api/groups` — lista grupos e participantes.
-- `POST /api/groups` — cria grupo; corpo: `{ "name": "Viagem", "members": ["Ana", "Bia"] }`.
+- `GET /api/groups?ids=chave1,chave2` — retorna apenas os grupos cujas chaves foram informadas (não há listagem global).
+- `POST /api/groups` — cria grupo; corpo: `{ "name": "Viagem", "members": ["Ana", "Bia"] }`. A resposta traz `id`, a chave secreta do grupo.
+
+Nas rotas abaixo, `:id` é essa chave (22 caracteres base64url), nunca um número sequencial.
+
 - `POST /api/groups/:id/members` — adiciona uma pessoa.
 - `GET /api/groups/:id/summary` — retorna despesas, saldos (com quanto cada pessoa pagou e consumiu), acertos e sugestões.
 - `POST /api/groups/:id/expenses` — registra despesa; corpo: `{ "description": "Jantar", "amount": 120.50, "paidBy": 1, "split": … }`.
@@ -94,10 +101,10 @@ test/                # testes de domínio e de integração da API
 
 ## Próximas melhorias
 
-- Contas de usuário e convite por link.
+- Contas de usuário opcionais para sincronizar grupos entre dispositivos.
 - Divisão por porcentagem ou por cotas.
 - Deploy com banco PostgreSQL e backups.
 
 ## Limitações desta versão
 
-Esta primeira versão é uma demonstração local: não possui autenticação, convite remoto nem integração com meios de pagamento. Não insira dados pessoais ou financeiros reais.
+Não há contas de usuário: quem tiver o link de um grupo pode ver e editar suas contas, como em links de documentos compartilhados. Não há integração com meios de pagamento.

@@ -13,7 +13,10 @@ function createApp(db) {
   app.disable('x-powered-by');
   app.use(securityHeaders);
   app.use(express.json({ limit: '32kb' }));
-  app.use(express.static(path.join(__dirname, '..', 'public')));
+  const publicDir = path.join(__dirname, '..', 'public');
+  app.use(express.static(publicDir));
+  // Link de convite: a SPA lê a chave da URL.
+  app.get('/g/:groupKey', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
   const api = express.Router();
   api.get('/health', (_req, res) => {

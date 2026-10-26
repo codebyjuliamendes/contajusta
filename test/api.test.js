@@ -46,8 +46,24 @@ test('cria grupo removendo nomes repetidos sem diferenciar maiúsculas', async (
     group.members.map(m => m.name),
     ['Ana', 'Bia'],
   );
-  const list = await request('GET', '/api/groups');
-  assert.ok(list.body.some(g => g.id === group.id && g.members.length === 2));
+  const list = await request('GET', `/api/groups?ids=${group.id}`);
+  assert.deepEqual(
+    list.body.map(g => [g.id, g.members.length]),
+    [[group.id, 2]],
+  );
+});
+
+test('grupos são privados: sem listagem global e sem acesso por id sequencial', async () => {
+  const group = await createGroup();
+  assert.match(group.id, /^[A-Za-z0-9_-]{22}$/);
+  assert.equal(group.rowId, undefined);
+  assert.deepEqual((await request('GET', '/api/groups')).body, []);
+  assert.deepEqual((await request('GET', '/api/groups?ids=chave-inexistente-123456')).body, []);
+  assert.equal((await request('GET', '/api/groups/1/summary')).status, 404);
+  const summary = await request('GET', `/api/groups/${group.id}/summary`);
+  assert.equal(summary.status, 200);
+  assert.equal(summary.body.group.id, group.id);
+  assert.equal(summary.body.group.rowId, undefined);
 });
 
 test('valida dados do grupo', async () => {

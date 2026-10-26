@@ -1,14 +1,15 @@
 'use strict';
 
 const $ = selector => document.querySelector(selector);
-const STORAGE_KEY = 'contajusta.group';
+const STORAGE = { groups: 'contajusta.groups', active: 'contajusta.active' };
+const GROUP_PATH = /^\/g\/([A-Za-z0-9_-]{16,64})\/?$/;
 const icons = ['⌂', '↗', '✳', '◉', '⌁', '✦'];
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const shortDate = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' });
 const dateTime = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const HISTORY_LABELS = { created: 'Criada', updated: 'Editada', deleted: 'Excluída' };
 
-const state = { groups: [], activeGroupId: readStoredGroup(), summaryRequest: 0, summary: null };
+const state = { groups: [], activeGroupId: readStorage(STORAGE.active, null), summaryRequest: 0, summary: null };
 let toastTimer;
 
 // ---------- utilitários ----------
@@ -45,21 +46,32 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 }
 
-function readStoredGroup() {
+// localStorage pode lançar (modo privado, cota); falha vira valor padrão.
+function readStorage(key, fallback) {
   try {
-    return Number(localStorage.getItem(STORAGE_KEY)) || null;
+    return JSON.parse(localStorage.getItem(key)) ?? fallback;
   } catch {
-    return null;
+    return fallback;
   }
 }
 
-function storeGroup(id) {
+function writeStorage(key, value) {
   try {
-    localStorage.setItem(STORAGE_KEY, id);
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    /* armazenamento indisponível: apenas não lembra o grupo */
+    /* sem persistência: o app segue funcionando na sessão atual */
   }
 }
+
+// Chaves dos grupos que este dispositivo conhece; a mais recente primeiro.
+const knownKeys = () => readStorage(STORAGE.groups, []).filter(key => typeof key === 'string');
+const rememberKey = key => writeStorage(STORAGE.groups, [key, ...knownKeys().filter(k => k !== key)]);
+const forgetKey = key =>
+  writeStorage(
+    STORAGE.groups,
+    knownKeys().filter(k => k !== key),
+  );
+const inviteUrl = key => `${location.origin}/g/${key}`;
 
 function toast(message) {
   const element = $('#toast');
@@ -84,13 +96,22 @@ async function withSubmitLock(form, action) {
 // ---------- dados ----------
 
 async function loadGroups(preferredId = state.activeGroupId) {
-  state.groups = await api('/api/groups');
-  selectGroup(state.groups.some(group => group.id === preferredId) ? preferredId : (state.groups[0]?.id ?? null));
+  const keys = knownKeys();
+  state.groups = keys.length ? await api(`/api/groups?ids=${keys.join(',')}`) : [];
+  // Remove chaves de grupos que não existem mais.
+  const found = new Set(state.groups.map(group => group.id));
+  writeStorage(
+    STORAGE.groups,
+    keys.filter(key => found.has(key)),
+  );
+  state.groups.sort((a, b) => keys.indexOf(a.id) - keys.indexOf(b.id));
+  selectGroup(found.has(preferredId) ? preferredId : (state.groups[0]?.id ?? null));
 }
 
 function selectGroup(id) {
   state.activeGroupId = id;
-  if (id) storeGroup(id);
+  writeStorage(STORAGE.active, id);
+  history.replaceState(null, '', id ? `/g/${id}` : '/');
   renderGroups();
   if (id) loadSummary();
   else renderWelcome();
@@ -182,7 +203,7 @@ function renderSummary({ group, members, expenses, settlements, balances, transf
   $('#content').innerHTML = `
     <div class="group-header">
       <div class="group-title"><span class="eyebrow">RESUMO DO GRUPO</span><h1>${escapeHtml(group.name)}</h1><p>${plural(members.length, 'participante', 'participantes')} · divisão igual ou personalizada por despesa</p></div>
-      <div class="header-actions"><button class="button secondary small" id="add-member">+ Adicionar pessoa</button><button class="button primary small" id="add-expense">+ Nova despesa</button></div>
+      <div class="header-actions"><button class="button secondary small" id="invite">Convidar</button><button class="button secondary small" id="add-member">+ Adicionar pessoa</button><button class="button primary small" id="add-expense">+ Nova despesa</button></div>
     </div>
     <div class="summary-grid">
       <article class="summary-card"><div class="summary-label"><span aria-hidden="true">↗</span>Total das despesas</div><div class="summary-value">${money(total)}</div><div class="summary-foot">${plural(expenses.length, 'despesa registrada', 'despesas registradas')}</div></article>
@@ -204,6 +225,7 @@ function renderSummary({ group, members, expenses, settlements, balances, transf
   $('#add-expense').addEventListener('click', () => openExpenseForm(members));
   $('#expense-shortcut').addEventListener('click', () => openExpenseForm(members));
   $('#add-member').addEventListener('click', openMemberForm);
+  $('#invite').addEventListener('click', () => openInviteDialog(group));
   $('#settlement-form')?.addEventListener('submit', event => {
     event.preventDefault();
     const [fromMember, toMember, amountCents] = $('#settlement-choice').value.split(':').map(Number);
@@ -447,6 +469,47 @@ const actions = {
 
 // ---------- grupos e pessoas ----------
 
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Quem tem o link acessa o grupo: é o modelo de acesso, sem contas.
+function openInviteDialog(group) {
+  const url = inviteUrl(group.id);
+  const canShare = typeof navigator.share === 'function';
+  const dialog = openDialog(`<div class="form-card">
+      ${closeButton}
+      <span class="eyebrow">CONVIDAR</span><h2>Chame o pessoal</h2>
+      <p>Quem tiver este link pode ver e editar as contas de <strong>${escapeHtml(group.name)}</strong>. Compartilhe só com o grupo.</p>
+      <label for="invite-link">Link do grupo</label>
+      <div class="copy-field"><input id="invite-link" value="${escapeHtml(url)}" readonly><button class="button primary small" type="button" data-copy>Copiar</button></div>
+      ${canShare ? '<button class="button secondary full" type="button" data-share>Compartilhar…</button>' : ''}
+      <button class="text-button danger forget-button" type="button" data-forget>Remover este grupo deste dispositivo</button>
+    </div>`);
+  const input = dialog.querySelector('#invite-link');
+  input.addEventListener('focus', () => input.select());
+  dialog.querySelector('[data-copy]').addEventListener('click', async () => {
+    if (await copyText(url)) toast('Link copiado!');
+    else input.select();
+  });
+  dialog
+    .querySelector('[data-share]')
+    ?.addEventListener('click', () =>
+      navigator.share({ title: `ContaJusta · ${group.name}`, text: `Entre no grupo "${group.name}" no ContaJusta`, url }).catch(() => {}),
+    );
+  dialog.querySelector('[data-forget]').addEventListener('click', async () => {
+    forgetKey(group.id);
+    dialog.close();
+    toast('Grupo removido deste dispositivo. O link continua funcionando.');
+    await loadGroups(null);
+  });
+}
+
 function openMemberForm() {
   openFormDialog(
     `<form class="form-card">
@@ -479,7 +542,7 @@ $('#content').addEventListener('click', event => {
 });
 $('#group-list').addEventListener('click', event => {
   const button = event.target.closest('[data-group]');
-  if (button) selectGroup(Number(button.dataset.group));
+  if (button) selectGroup(button.dataset.group);
 });
 $('#group-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -492,6 +555,7 @@ $('#group-form').addEventListener('submit', event => {
   withSubmitLock(formElement, async () => {
     try {
       const group = await post('/api/groups', { name: form.get('name'), members });
+      rememberKey(group.id);
       $('#group-dialog').close();
       toast('Grupo criado. Bora acertar as contas!');
       await loadGroups(group.id);
@@ -501,6 +565,15 @@ $('#group-form').addEventListener('submit', event => {
   });
 });
 
-loadGroups().catch(error => {
+// Abrir um link /g/<chave> adiciona o grupo à lista deste dispositivo.
+function boot() {
+  const linkedKey = GROUP_PATH.exec(location.pathname)?.[1];
+  if (linkedKey) rememberKey(linkedKey);
+  return loadGroups(linkedKey ?? state.activeGroupId).then(() => {
+    if (linkedKey && state.activeGroupId !== linkedKey) toast('Link de grupo inválido ou expirado.');
+  });
+}
+
+boot().catch(error => {
   $('#content').innerHTML = `<div class="welcome"><h1>Opa, algo deu errado</h1><p>${escapeHtml(error.message)}</p></div>`;
 });

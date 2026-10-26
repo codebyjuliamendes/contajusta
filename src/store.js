@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 // Map.groupBy só existe a partir do Node 21.
 function groupBy(rows, key) {
   const map = new Map();
@@ -11,14 +13,22 @@ function groupBy(rows, key) {
   return map;
 }
 
+// 128 bits em base64url: inviável de adivinhar ou enumerar.
+const newPublicId = () => crypto.randomBytes(16).toString('base64url');
+
+// rowId é interno (FKs); a API só expõe o public_id como `id`.
+const publicGroup = ({ rowId: _rowId, ...group }) => group;
+
 /** Acesso a dados. Toda SQL fica aqui; registros com deleted_at são ignorados nas leituras. */
 function createStore(db) {
   const sql = {
-    listGroups: db.prepare('SELECT id, name, created_at AS createdAt FROM groups ORDER BY id DESC'),
-    listAllMembers: db.prepare('SELECT id, group_id AS groupId, name FROM members ORDER BY id'),
-    getGroup: db.prepare('SELECT id, name, created_at AS createdAt FROM groups WHERE id = ?'),
+    groupsByKeys: db.prepare(`SELECT id AS rowId, public_id AS id, name, created_at AS createdAt
+      FROM groups WHERE public_id IN (SELECT value FROM json_each(?)) ORDER BY id DESC`),
+    membersOfGroups: db.prepare(`SELECT id, group_id AS groupId, name
+      FROM members WHERE group_id IN (SELECT value FROM json_each(?)) ORDER BY id`),
+    getGroupByKey: db.prepare('SELECT id AS rowId, public_id AS id, name, created_at AS createdAt FROM groups WHERE public_id = ?'),
     groupMembers: db.prepare('SELECT id, name FROM members WHERE group_id = ? ORDER BY id'),
-    insertGroup: db.prepare('INSERT INTO groups (name) VALUES (?)'),
+    insertGroup: db.prepare('INSERT INTO groups (name, public_id) VALUES (?, ?)'),
     insertMember: db.prepare('INSERT INTO members (group_id, name) VALUES (?, ?)'),
 
     getExpense:
@@ -83,9 +93,10 @@ function createStore(db) {
   };
 
   const createGroup = db.transaction((name, memberNames) => {
-    const groupId = Number(sql.insertGroup.run(name).lastInsertRowid);
-    for (const memberName of memberNames) sql.insertMember.run(groupId, memberName);
-    return { ...sql.getGroup.get(groupId), members: sql.groupMembers.all(groupId) };
+    const publicId = newPublicId();
+    const rowId = Number(sql.insertGroup.run(name, publicId).lastInsertRowid);
+    for (const memberName of memberNames) sql.insertMember.run(rowId, memberName);
+    return { ...publicGroup(sql.getGroupByKey.get(publicId)), members: sql.groupMembers.all(rowId) };
   });
 
   const addExpense = db.transaction(expense => {
@@ -110,14 +121,17 @@ function createStore(db) {
   });
 
   return {
-    listGroups() {
-      const membersByGroup = groupBy(sql.listAllMembers.all(), 'groupId');
-      return sql.listGroups.all().map(group => ({
-        ...group,
-        members: (membersByGroup.get(group.id) || []).map(({ id, name }) => ({ id, name })),
+    /** Só os grupos cujas chaves o cliente já conhece. */
+    groupsByKeys(keys) {
+      const groups = sql.groupsByKeys.all(JSON.stringify(keys));
+      const membersByGroup = groupBy(sql.membersOfGroups.all(JSON.stringify(groups.map(g => g.rowId))), 'groupId');
+      return groups.map(group => ({
+        ...publicGroup(group),
+        members: (membersByGroup.get(group.rowId) || []).map(({ id, name }) => ({ id, name })),
       }));
     },
-    getGroup: id => sql.getGroup.get(id),
+    getGroupByKey: key => sql.getGroupByKey.get(key),
+    publicGroup,
     groupMembers: id => sql.groupMembers.all(id),
     createGroup,
     addMember: (groupId, name) => ({ id: Number(sql.insertMember.run(groupId, name).lastInsertRowid), name }),

@@ -26,7 +26,10 @@ test('migra banco da v1 preservando dados e gerando histórico das despesas exis
   migrate(db); // idempotente
 
   const store = createStore(db);
-  assert.equal(db.pragma('user_version', { simple: true }), 3);
+  assert.equal(db.pragma('user_version', { simple: true }), 4);
+  const key = db.prepare('SELECT public_id FROM groups WHERE id = 1').pluck().get();
+  assert.match(key, /^[0-9a-f]{32}$/);
+  assert.equal(store.getGroupByKey(key).rowId, 1);
   assert.equal(store.expenses(1)[0].splitMode, 'equal');
   assert.deepEqual(
     store.balances(1).map(b => b.balanceCents),

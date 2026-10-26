@@ -15,6 +15,17 @@ function parseId(value) {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+const GROUP_KEY = /^[A-Za-z0-9_-]{16,64}$/;
+const MAX_GROUP_KEYS = 50;
+
+const parseGroupKey = value => (typeof value === 'string' && GROUP_KEY.test(value) ? value : null);
+
+/** "?ids=a,b,c" -> chaves válidas e únicas; inválidas são descartadas. */
+function parseGroupKeys(value) {
+  if (typeof value !== 'string') return [];
+  return [...new Set(value.split(',').map(parseGroupKey).filter(Boolean))].slice(0, MAX_GROUP_KEYS);
+}
+
 /** Remove vazios e duplicados (case-insensitive), preservando a primeira grafia. */
 function uniqueNames(values) {
   const seen = new Map();
@@ -92,4 +103,4 @@ function parseExpenseInput(body, members) {
   return { description, paidBy, amountCents, splitMode: split.mode, shares: buildShares(amountCents, split, memberIds) };
 }
 
-module.exports = { MAX_MEMBERS, cleanText, nameKey, parseId, parseMemberName, parseGroupInput, parseExpenseInput };
+module.exports = { MAX_MEMBERS, cleanText, nameKey, parseId, parseGroupKey, parseGroupKeys, parseMemberName, parseGroupInput, parseExpenseInput };

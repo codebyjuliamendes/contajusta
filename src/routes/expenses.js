@@ -10,32 +10,32 @@ function expenseRoutes(store) {
   // Despesas excluídas (soft delete) respondem 404.
   const loadExpense = (req, _res, next) => {
     const id = parseId(req.params.expenseId);
-    req.expense = id && store.getExpense(req.group.id, id);
+    req.expense = id && store.getExpense(req.group.rowId, id);
     next(req.expense ? undefined : notFound('Despesa não encontrada.'));
   };
 
   router.post('/', (req, res) => {
-    const expense = parseExpenseInput(req.body, store.groupMembers(req.group.id));
-    const id = store.addExpense({ ...expense, groupId: req.group.id });
+    const expense = parseExpenseInput(req.body, store.groupMembers(req.group.rowId));
+    const id = store.addExpense({ ...expense, groupId: req.group.rowId });
     res.status(201).json({ id, amountCents: expense.amountCents });
   });
 
   router.get('/:expenseId', loadExpense, (req, res) => res.json(req.expense));
 
   router.put('/:expenseId', loadExpense, (req, res) => {
-    const expense = parseExpenseInput(req.body, store.groupMembers(req.group.id));
+    const expense = parseExpenseInput(req.body, store.groupMembers(req.group.rowId));
     store.updateExpense(req.expense.id, expense);
-    res.json(store.getExpense(req.group.id, req.expense.id));
+    res.json(store.getExpense(req.group.rowId, req.expense.id));
   });
 
   router.delete('/:expenseId', loadExpense, (req, res) => {
-    store.deleteExpense(req.group.id, req.expense.id);
+    store.deleteExpense(req.group.rowId, req.expense.id);
     res.status(204).end();
   });
 
   // Histórico continua acessível após a exclusão, por isso não usa loadExpense.
   router.get('/:expenseId/history', (req, res, next) => {
-    const events = store.expenseHistory(req.group.id, parseId(req.params.expenseId));
+    const events = store.expenseHistory(req.group.rowId, parseId(req.params.expenseId));
     if (!events.length) return next(notFound('Despesa não encontrada.'));
     res.json(events);
   });

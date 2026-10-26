@@ -36,6 +36,10 @@ const migrations = [
                        FROM expense_splits s WHERE s.expense_id = e.id))),
      e.created_at
    FROM expenses e;`,
+  // Chave pública não sequencial: o acesso ao grupo é feito só por quem tem o link.
+  `ALTER TABLE groups ADD COLUMN public_id TEXT;
+   UPDATE groups SET public_id = lower(hex(randomblob(16))) WHERE public_id IS NULL;
+   CREATE UNIQUE INDEX idx_groups_public_id ON groups(public_id);`,
 ];
 
 function migrate(db) {

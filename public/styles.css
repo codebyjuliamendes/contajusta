@@ -982,3 +982,17 @@ button:disabled {
     gap: 8px;
   }
 }
+.copy-field {
+  display: flex;
+  gap: 8px;
+}
+.copy-field input {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.forget-button {
+  display: block;
+  margin: 16px auto 0;
+}

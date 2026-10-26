@@ -12,13 +12,13 @@ function settlementRoutes(store) {
     const from = parseId(req.body?.fromMember);
     const to = parseId(req.body?.toMember);
     const amountCents = req.body?.amountCents;
-    assertValidSettlement(store.balances(req.group.id), from, to, amountCents);
-    res.status(201).json({ id: store.addSettlement(req.group.id, from, to, amountCents) });
+    assertValidSettlement(store.balances(req.group.rowId), from, to, amountCents);
+    res.status(201).json({ id: store.addSettlement(req.group.rowId, from, to, amountCents) });
   });
 
   // Desfaz um acerto registrado por engano (soft delete).
   router.delete('/:settlementId', (req, res, next) => {
-    if (!store.deleteSettlement(req.group.id, parseId(req.params.settlementId))) return next(notFound('Acerto não encontrado.'));
+    if (!store.deleteSettlement(req.group.rowId, parseId(req.params.settlementId))) return next(notFound('Acerto não encontrado.'));
     res.status(204).end();
   });
 
