@@ -26,10 +26,16 @@ Abra <http://localhost:3000>. Os dados ficam em `data/contajusta.sqlite`, que n�
 
 ### Variáveis de ambiente
 
-| Variável        | Padrão                   | Descrição                                         |
-| --------------- | ------------------------ | ------------------------------------------------- |
-| `PORT`          | `3000`                   | Porta HTTP.                                       |
-| `DATABASE_PATH` | `data/contajusta.sqlite` | Caminho do banco SQLite (`:memory:` para testes). |
+Validadas no boot (valor inválido derruba o processo com mensagem clara). Modelo em `.env.example`.
+
+| Variável                | Padrão                   | Descrição                                                      |
+| ----------------------- | ------------------------ | -------------------------------------------------------------- |
+| `PORT`                  | `3000`                   | Porta HTTP.                                                    |
+| `DATABASE_PATH`         | `data/contajusta.sqlite` | Caminho do banco SQLite.                                       |
+| `LOG_LEVEL`             | `info`                   | `debug`, `info`, `warn`, `error` ou `silent`.                  |
+| `TRUST_PROXY`           | `0`                      | Saltos de proxy confiáveis; use `1` atrás de Fly/Render/Nginx. |
+| `RATE_LIMIT_PER_MINUTE` | `60`                     | Escritas por IP por minuto na API; `0` desativa.               |
+| `BACKUP_KEEP`           | `14`                     | Quantidade de backups mantidos por `npm run backup`.           |
 
 ### Scripts
 
@@ -39,21 +45,59 @@ npm test              # testes de domínio, API, migração e do servidor real (
 npm run lint          # ESLint
 npm run format        # Prettier
 npm run check         # lint + formatação + testes (o mesmo que roda no CI)
+npm run backup        # backup online do SQLite com retenção
 ```
+
+## Produção
+
+### Docker
+
+```bash
+docker compose up --build    # http://localhost:3000, dados no volume contajusta-data
+```
+
+A imagem roda como usuário sem privilégios, guarda o banco em `/data` (volume) e tem `HEALTHCHECK` em `/api/health`.
+
+### Fly.io
+
+```bash
+fly launch --no-deploy                       # usa o fly.toml do repositório
+fly volumes create contajusta_data --size 1  # disco persistente do SQLite
+fly deploy
+```
+
+SQLite exige **uma única instância** com volume. Para escalar horizontalmente, migre para PostgreSQL (o acesso a dados está isolado em `src/store.js`).
+
+### Backups
+
+`npm run backup` usa a API de backup online do SQLite: a cópia é consistente mesmo com o app no ar. Agende via cron (ou `fly machine run … --schedule daily`) e copie o diretório para um storage externo (S3, R2, Backblaze).
+
+### Observabilidade
+
+- Logs em JSON, uma linha por evento, com `requestId` (propaga `X-Request-Id` recebido ou gera um UUID, devolvido no cabeçalho da resposta).
+- Chaves de grupo aparecem redigidas nos logs (`/g/dHhM…`), pois funcionam como credenciais.
+- `GET /api/health` verifica o banco e retorna a versão em execução.
+
+### CI/CD
+
+Cada push e PR roda lint, formatação e testes em Node 20 e 22, constrói a imagem Docker e faz smoke test do container. O Dependabot abre PRs semanais de dependências npm e mensais de actions e imagem base.
 
 ## Estrutura
 
 ```
-server.js            # ponto de entrada: abre o banco, sobe o HTTP e faz shutdown gracioso
+server.js            # ponto de entrada: config, logger, banco, HTTP e shutdown gracioso
 src/
   app.js             # composição do Express
   db.js              # conexão SQLite e migrações versionadas (PRAGMA user_version)
   store.js           # acesso a dados (toda a SQL fica aqui)
-  http/              # erros, headers de segurança e validação/normalização de entrada
+  config.js          # variáveis de ambiente validadas
+  logger.js          # logger JSON estruturado
+  http/              # erros, segurança, request id/log de acesso, rate limit e validação
   routes/            # rotas por recurso: grupos, despesas e acertos
   domain/            # regras puras, sem I/O: dinheiro, divisão e acertos
 public/              # frontend estático (HTML, CSS e JS sem framework)
-test/                # testes de domínio e de integração da API
+scripts/backup.js    # backup online do SQLite
+test/                # testes de domínio, API, migração, infra e servidor real
 ```
 
 ## Stack

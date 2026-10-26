@@ -35,7 +35,10 @@ async function createGroup(members = ['Ana', 'Bia', 'Caio']) {
 test('health check responde ok com cabeçalhos de segurança', async () => {
   const { status, headers, body } = await request('GET', '/api/health');
   assert.equal(status, 200);
-  assert.deepEqual(body, { status: 'ok' });
+  assert.equal(body.status, 'ok');
+  assert.match(body.version, /^\d+\.\d+\.\d+$/);
+  assert.match(headers.get('x-request-id'), /^[0-9a-f-]{36}$/);
+  assert.equal(headers.get('cache-control'), 'no-store');
   assert.match(headers.get('content-security-policy'), /default-src 'self'/);
   assert.equal(headers.get('x-powered-by'), null);
 });

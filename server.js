@@ -1,17 +1,19 @@
 'use strict';
 
-const path = require('node:path');
+const { loadConfig } = require('./src/config');
+const { createLogger, serializeError } = require('./src/logger');
 const { openDatabase } = require('./src/db');
 const { createApp } = require('./src/app');
 
-const port = Number(process.env.PORT) || 3000;
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'contajusta.sqlite');
+const config = loadConfig();
+const logger = createLogger({ level: config.logLevel, bindings: { service: 'contajusta' } });
+const db = openDatabase(config.databasePath);
+const app = createApp(db, { logger, rateLimitPerMinute: config.rateLimitPerMinute, trustProxy: config.trustProxy });
 
-const db = openDatabase(dbPath);
-const server = createApp(db).listen(port, () => console.log(`ContaJusta disponível em http://localhost:${port}`));
+const server = app.listen(config.port, () => logger.info('server_started', { port: config.port, env: config.env }));
 
 function shutdown(signal) {
-  console.log(`${signal} recebido, encerrando...`);
+  logger.info('shutdown', { signal });
   server.close(() => {
     db.close();
     process.exit(0);
@@ -20,3 +22,8 @@ function shutdown(signal) {
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+process.on('unhandledRejection', reason => logger.error('unhandled_rejection', { err: serializeError(Object(reason)) }));
+process.on('uncaughtException', err => {
+  logger.error('uncaught_exception', { err: serializeError(err) });
+  process.exit(1);
+});
