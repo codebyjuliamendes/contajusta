@@ -1,37 +1,58 @@
 <!doctype html>
 <html lang="pt-BR">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f6f5f1">
-  <meta name="description" content="Divida despesas em grupo sem perder a conta.">
-  <title>ContaJusta — despesas compartilhadas, sem complicação</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
-</head>
-<body>
-  <header class="topbar"><a class="brand" href="/"><span class="brand-mark">cj</span> conta<span>justa</span></a><div class="topbar-right"><span class="secure-dot"></span> Seu grupo, suas contas</div></header>
-  <main class="shell">
-    <aside class="sidebar">
-      <div class="sidebar-heading"><div><span class="eyebrow">ESPAÇO COMPARTILHADO</span><h2>Seus grupos</h2></div><button id="new-group-open" class="icon-button" aria-label="Criar grupo" title="Criar grupo">+</button></div>
-      <div id="group-list" class="group-list"></div>
-      <div class="sidebar-note"><span class="note-icon">✳</span><p>Despesas claras.<br><strong>Amizades intactas.</strong></p></div>
-      <div class="sidebar-footer">Feito para dividir, sem complicar.<br><span>ContaJusta © 2026</span></div>
-    </aside>
-    <section id="content" class="content" aria-live="polite"></section>
-  </main>
-  <dialog id="group-dialog">
-    <form id="group-form" class="dialog-card">
-      <button type="button" class="dialog-close" data-close-dialog aria-label="Fechar">×</button>
-      <span class="eyebrow">NOVO COMEÇO</span><h2>Vamos criar um grupo?</h2><p>Uma viagem, a casa ou aquele jantar de sempre. Escolha um nome e convide o pessoal.</p>
-      <label for="group-name">Nome do grupo</label><input id="group-name" name="name" maxlength="60" placeholder="Ex.: Fim de semana na praia" required>
-      <label for="member-names">Quem vai participar?</label><textarea id="member-names" name="members" rows="3" placeholder="Digite os nomes separados por vírgula" required></textarea><span class="field-hint">Adicione pelo menos duas pessoas.</span>
-      <p id="dialog-error" class="form-error" role="alert"></p><button class="button primary full" type="submit">Criar grupo <span>→</span></button>
-    </form>
-  </dialog>
-  <div id="toast" class="toast" role="status"></div>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f6f5f1" />
+    <meta name="description" content="Divida despesas em grupo sem perder a conta." />
+    <title>ContaJusta — despesas compartilhadas, sem complicação</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/"><span class="brand-mark">cj</span> conta<span>justa</span></a>
+      <div class="topbar-right"><span class="secure-dot"></span> Seu grupo, suas contas</div>
+    </header>
+    <main class="shell">
+      <aside class="sidebar">
+        <div class="sidebar-heading">
+          <div>
+            <span class="eyebrow">ESPAÇO COMPARTILHADO</span>
+            <h2>Seus grupos</h2>
+          </div>
+          <button id="new-group-open" class="icon-button" aria-label="Criar grupo" title="Criar grupo">+</button>
+        </div>
+        <div id="group-list" class="group-list"></div>
+        <div class="sidebar-note">
+          <span class="note-icon">✳</span>
+          <p>Despesas claras.<br /><strong>Amizades intactas.</strong></p>
+        </div>
+        <div class="sidebar-footer">Feito para dividir, sem complicar.<br /><span>ContaJusta © 2026</span></div>
+      </aside>
+      <section id="content" class="content" aria-live="polite"></section>
+    </main>
+    <dialog id="group-dialog">
+      <form id="group-form" class="dialog-card">
+        <button type="button" class="dialog-close" data-close-dialog aria-label="Fechar">×</button>
+        <span class="eyebrow">NOVO COMEÇO</span>
+        <h2>Vamos criar um grupo?</h2>
+        <p>Uma viagem, a casa ou aquele jantar de sempre. Escolha um nome e convide o pessoal.</p>
+        <label for="group-name">Nome do grupo</label
+        ><input id="group-name" name="name" maxlength="60" placeholder="Ex.: Fim de semana na praia" required />
+        <label for="member-names">Quem vai participar?</label
+        ><textarea id="member-names" name="members" rows="3" placeholder="Digite os nomes separados por vírgula" required></textarea
+        ><span class="field-hint">Adicione pelo menos duas pessoas.</span>
+        <p id="dialog-error" class="form-error" role="alert"></p>
+        <button class="button primary full" type="submit">Criar grupo <span>→</span></button>
+      </form>
+    </dialog>
+    <div id="toast" class="toast" role="status"></div>
+  </body>
 </html>
