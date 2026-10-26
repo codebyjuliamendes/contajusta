@@ -3,7 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseAmountToCents } = require('../src/domain/money');
-const { splitEvenly } = require('../src/domain/split');
+const { splitEvenly, buildShares } = require('../src/domain/split');
+const { ValidationError } = require('../src/domain/errors');
 const { suggestTransfers } = require('../src/domain/settle');
 
 test('parseAmountToCents converte formatos comuns sem erro de ponto flutuante', () => {
@@ -32,7 +33,7 @@ test('splitEvenly distribui os centavos restantes e preserva o total', () => {
     shares.reduce((sum, s) => sum + s.amountCents, 0),
     100,
   );
-  assert.throws(() => splitEvenly(100, []), RangeError);
+  assert.throws(() => splitEvenly(100, []), ValidationError);
 });
 
 test('suggestTransfers zera todos os saldos', () => {
@@ -66,4 +67,47 @@ test('suggestTransfers casa maiores valores primeiro', () => {
       [4, 1, 500],
     ],
   );
+});
+
+test('buildShares: divisão igual respeita a ordem do grupo e ignora seleção fora de ordem', () => {
+  const shares = buildShares(100, { mode: 'equal', memberIds: [3, 1] }, [1, 2, 3]);
+  assert.deepEqual(shares, [
+    { memberId: 1, amountCents: 50 },
+    { memberId: 3, amountCents: 50 },
+  ]);
+});
+
+test('buildShares: valores exatos precisam fechar o total', () => {
+  const exact = shares => ({ mode: 'exact', shares });
+  assert.deepEqual(
+    buildShares(
+      100,
+      exact([
+        { memberId: 1, amountCents: 70 },
+        { memberId: 2, amountCents: 30 },
+        { memberId: 3, amountCents: 0 },
+      ]),
+      [1, 2, 3],
+    ),
+    [
+      { memberId: 1, amountCents: 70 },
+      { memberId: 2, amountCents: 30 },
+    ],
+  );
+  assert.throws(() => buildShares(100, exact([{ memberId: 1, amountCents: 99 }]), [1, 2]), /soma/);
+  assert.throws(() => buildShares(100, exact([{ memberId: 9, amountCents: 100 }]), [1, 2]), /não está no grupo/);
+  assert.throws(
+    () =>
+      buildShares(
+        100,
+        exact([
+          { memberId: 1, amountCents: 50 },
+          { memberId: 1, amountCents: 50 },
+        ]),
+        [1, 2],
+      ),
+    /só uma vez/,
+  );
+  assert.throws(() => buildShares(100, { mode: 'equal', memberIds: [] }, [1, 2]), ValidationError);
+  assert.throws(() => buildShares(100, { mode: 'percent' }, [1, 2]), /inválido/);
 });

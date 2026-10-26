@@ -16,6 +16,26 @@ const migrations = [
    CREATE INDEX IF NOT EXISTS idx_expenses_group ON expenses(group_id);
    CREATE INDEX IF NOT EXISTS idx_expense_splits_member ON expense_splits(member_id);
    CREATE INDEX IF NOT EXISTS idx_settlements_group ON settlements(group_id);`,
+  // Soft delete + trilha de auditoria. Backfill gera o evento 'created' das despesas existentes.
+  `ALTER TABLE expenses ADD COLUMN split_mode TEXT NOT NULL DEFAULT 'equal' CHECK (split_mode IN ('equal', 'exact'));
+   ALTER TABLE expenses ADD COLUMN updated_at TEXT;
+   ALTER TABLE expenses ADD COLUMN deleted_at TEXT;
+   ALTER TABLE settlements ADD COLUMN deleted_at TEXT;
+   CREATE TABLE expense_events (
+     id INTEGER PRIMARY KEY,
+     expense_id INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+     action TEXT NOT NULL CHECK (action IN ('created', 'updated', 'deleted')),
+     snapshot TEXT NOT NULL CHECK (json_valid(snapshot)),
+     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+   );
+   CREATE INDEX idx_expense_events_expense ON expense_events(expense_id);
+   INSERT INTO expense_events (expense_id, action, snapshot, created_at)
+   SELECT e.id, 'created',
+     json_object('description', e.description, 'amountCents', e.amount_cents, 'paidBy', e.paid_by, 'splitMode', e.split_mode,
+       'shares', json((SELECT json_group_array(json_object('memberId', s.member_id, 'amountCents', s.amount_cents))
+                       FROM expense_splits s WHERE s.expense_id = e.id))),
+     e.created_at
+   FROM expenses e;`,
 ];
 
 function migrate(db) {

@@ -1,5 +1,7 @@
 'use strict';
 
+const { ValidationError } = require('./errors');
+
 /**
  * Sugere transferências que zeram os saldos líquidos do grupo.
  * Estratégia gulosa: sempre casa o maior devedor com o maior credor, o que
@@ -32,4 +34,16 @@ function suggestTransfers(balances) {
   return transfers;
 }
 
-module.exports = { suggestTransfers };
+/** Acerto só é válido entre devedor e credor atuais, até o menor dos dois saldos. */
+function assertValidSettlement(balances, from, to, amountCents) {
+  const debtor = balances.find(m => m.id === from);
+  const creditor = balances.find(m => m.id === to);
+  if (!debtor || !creditor || from === to || debtor.balanceCents >= 0 || creditor.balanceCents <= 0) {
+    throw new ValidationError('Este acerto não corresponde a uma dívida atual.');
+  }
+  if (!Number.isSafeInteger(amountCents) || amountCents < 1 || amountCents > Math.min(-debtor.balanceCents, creditor.balanceCents)) {
+    throw new ValidationError('O valor do acerto excede o saldo pendente.');
+  }
+}
+
+module.exports = { suggestTransfers, assertValidSettlement };

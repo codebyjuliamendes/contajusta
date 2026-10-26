@@ -5,8 +5,10 @@ const STORAGE_KEY = 'contajusta.group';
 const icons = ['⌂', '↗', '✳', '◉', '⌁', '✦'];
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const shortDate = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' });
+const dateTime = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+const HISTORY_LABELS = { created: 'Criada', updated: 'Editada', deleted: 'Excluída' };
 
-const state = { groups: [], activeGroupId: readStoredGroup(), summaryRequest: 0 };
+const state = { groups: [], activeGroupId: readStoredGroup(), summaryRequest: 0, summary: null };
 let toastTimer;
 
 // ---------- utilitários ----------
@@ -19,6 +21,9 @@ async function api(url, options = {}) {
 }
 
 const post = (url, body) => api(url, { method: 'POST', body: JSON.stringify(body) });
+const put = (url, body) => api(url, { method: 'PUT', body: JSON.stringify(body) });
+const del = url => api(url, { method: 'DELETE' });
+const groupUrl = path => `/api/groups/${state.activeGroupId}${path}`;
 const money = cents => currency.format(cents / 100);
 const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
 const initials = name =>
@@ -29,7 +34,12 @@ const initials = name =>
     .join('')
     .toLocaleUpperCase('pt-BR');
 // O SQLite grava CURRENT_TIMESTAMP em UTC no formato "AAAA-MM-DD HH:MM:SS".
-const formatDate = sqlDate => shortDate.format(new Date(`${sqlDate.replace(' ', 'T')}Z`));
+const parseSqlDate = sqlDate => new Date(`${sqlDate.replace(' ', 'T')}Z`);
+const formatDate = sqlDate => shortDate.format(parseSqlDate(sqlDate));
+const formatDateTime = sqlDate => dateTime.format(parseSqlDate(sqlDate));
+// Apenas para feedback visual; o servidor faz a conversão autoritativa.
+const toCents = value => Math.round((Number.parseFloat(String(value).replace(',', '.')) || 0) * 100);
+const centsToInput = cents => (cents / 100).toFixed(2);
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -93,7 +103,9 @@ async function loadSummary() {
   try {
     const summary = await api(`/api/groups/${groupId}/summary`);
     // Ignora respostas atrasadas quando a pessoa já trocou de grupo.
-    if (requestId === state.summaryRequest) renderSummary(summary);
+    if (requestId !== state.summaryRequest) return;
+    state.summary = summary;
+    renderSummary(summary);
   } catch (error) {
     if (requestId !== state.summaryRequest) return;
     $('#content').innerHTML =
@@ -134,12 +146,27 @@ function transferRow(transfer) {
   return `<div class="transfer-row"><div class="transfer-main">${avatar(transfer.from)}<div><div class="transfer-names">${escapeHtml(transfer.from)} <span class="transfer-arrow">→</span> ${escapeHtml(transfer.to)}</div><div class="transfer-note">acerto sugerido</div></div></div><span class="balance-amount">${money(transfer.amountCents)}</span></div>`;
 }
 
-function expenseRow(expense) {
-  return `<div class="expense-row"><div class="expense-main"><span class="expense-symbol" aria-hidden="true">↗</span><div><div class="expense-desc">${escapeHtml(expense.description)}</div><div class="expense-note">${escapeHtml(expense.paidBy)} pagou · ${formatDate(expense.createdAt)}</div></div></div><span class="expense-amount">${money(expense.amountCents)}</span></div>`;
+function splitLabel(expense, memberCount) {
+  if (expense.splitMode === 'exact') return 'valores por pessoa';
+  return expense.shares.length === memberCount ? 'igual para todos' : `igual entre ${expense.shares.length}`;
+}
+
+function expenseRow(expense, memberCount) {
+  const edited = expense.updatedAt ? ' · editada' : '';
+  return `<div class="expense-row">
+    <div class="expense-main"><span class="expense-symbol" aria-hidden="true">↗</span><div><div class="expense-desc">${escapeHtml(expense.description)}</div><div class="expense-note">${escapeHtml(expense.paidBy)} pagou · ${formatDate(expense.createdAt)} · ${splitLabel(expense, memberCount)}${edited}</div></div></div>
+    <div class="row-end"><span class="expense-amount">${money(expense.amountCents)}</span>
+      <div class="row-actions">
+        <button class="text-button" data-action="edit-expense" data-id="${expense.id}">Editar</button>
+        <button class="text-button muted" data-action="expense-history" data-id="${expense.id}">Histórico</button>
+        <button class="text-button danger" data-action="delete-expense" data-id="${expense.id}">Excluir</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function settlementRow(settlement) {
-  return `<div class="settlement-row"><span>${escapeHtml(settlement.fromName)} acertou com ${escapeHtml(settlement.toName)}</span><strong>${money(settlement.amountCents)}</strong></div>`;
+  return `<div class="settlement-row"><span>${escapeHtml(settlement.fromName)} acertou com ${escapeHtml(settlement.toName)} · ${formatDate(settlement.createdAt)}</span><span class="row-end-inline"><strong>${money(settlement.amountCents)}</strong><button class="text-button danger" data-action="undo-settlement" data-id="${settlement.id}">Desfazer</button></span></div>`;
 }
 
 function renderSummary({ group, members, expenses, settlements, balances, transfers }) {
@@ -154,7 +181,7 @@ function renderSummary({ group, members, expenses, settlements, balances, transf
 
   $('#content').innerHTML = `
     <div class="group-header">
-      <div class="group-title"><span class="eyebrow">RESUMO DO GRUPO</span><h1>${escapeHtml(group.name)}</h1><p>${plural(members.length, 'participante', 'participantes')} · cada despesa é dividida igualmente</p></div>
+      <div class="group-title"><span class="eyebrow">RESUMO DO GRUPO</span><h1>${escapeHtml(group.name)}</h1><p>${plural(members.length, 'participante', 'participantes')} · divisão igual ou personalizada por despesa</p></div>
       <div class="header-actions"><button class="button secondary small" id="add-member">+ Adicionar pessoa</button><button class="button primary small" id="add-expense">+ Nova despesa</button></div>
     </div>
     <div class="summary-grid">
@@ -170,7 +197,7 @@ function renderSummary({ group, members, expenses, settlements, balances, transf
       </section>
     </div>
     <section class="panel table-panel"><div class="panel-head"><div><h2>Despesas do grupo</h2><p>Quem pagou e quanto foi</p></div><button id="expense-shortcut" class="text-button">+ Adicionar despesa</button></div>
-      <div class="expense-list">${expenses.length ? expenses.map(expenseRow).join('') : '<div class="empty-table"><strong>Ainda não tem despesas</strong>Quando alguém pagar por algo, adicione aqui.</div>'}</div>
+      <div class="expense-list">${expenses.length ? expenses.map(expense => expenseRow(expense, members.length)).join('') : '<div class="empty-table"><strong>Ainda não tem despesas</strong>Quando alguém pagar por algo, adicione aqui.</div>'}</div>
     </section>
     ${settlements.length ? `<section class="panel stacked-panel"><div class="panel-head"><div><h2>Acertos registrados</h2><p>Pagamentos feitos entre participantes</p></div></div><div class="settlement-list">${settlements.map(settlementRow).join('')}</div></section>` : ''}`;
 
@@ -182,7 +209,7 @@ function renderSummary({ group, members, expenses, settlements, balances, transf
     const [fromMember, toMember, amountCents] = $('#settlement-choice').value.split(':').map(Number);
     withSubmitLock(event.currentTarget, async () => {
       try {
-        await post(`/api/groups/${state.activeGroupId}/settlements`, { fromMember, toMember, amountCents });
+        await post(groupUrl('/settlements'), { fromMember, toMember, amountCents });
         toast('Acerto registrado. Saldo atualizado!');
         await loadSummary();
       } catch (error) {
@@ -192,67 +219,234 @@ function renderSummary({ group, members, expenses, settlements, balances, transf
   });
 }
 
-// ---------- formulários ----------
+// ---------- diálogos ----------
 
-// Abre um <dialog> modal: o navegador cuida do foco, do Esc e do fundo inerte.
-function openFormDialog(html, onSubmit) {
+const closeButton = '<button type="button" class="dialog-close" data-dismiss aria-label="Fechar">×</button>';
+
+// <dialog> modal: o navegador cuida do foco, do Esc e do fundo inerte. Removido do DOM ao fechar.
+function openDialog(html) {
   const dialog = document.createElement('dialog');
   dialog.className = 'form-dialog';
   dialog.innerHTML = html;
-  const form = dialog.querySelector('form');
-  const error = form.querySelector('.form-error');
   dialog.addEventListener('close', () => dialog.remove());
   dialog.addEventListener('click', event => {
     if (event.target === dialog || event.target.closest('[data-dismiss]')) dialog.close();
   });
+  document.body.append(dialog);
+  dialog.showModal();
+  return dialog;
+}
+
+// onSubmit(formData, form) lança erro para manter o diálogo aberto com a mensagem.
+function openFormDialog(html, onSubmit) {
+  const dialog = openDialog(html);
+  const form = dialog.querySelector('form');
+  const error = form.querySelector('.form-error');
   form.addEventListener('submit', event => {
     event.preventDefault();
     error.textContent = '';
     withSubmitLock(form, async () => {
       try {
-        await onSubmit(new FormData(form));
+        await onSubmit(new FormData(form), form);
         dialog.close();
       } catch (exception) {
         error.textContent = exception.message;
       }
     });
   });
-  document.body.append(dialog);
-  dialog.showModal();
+  return dialog;
 }
 
-function openExpenseForm(members) {
+function confirmAction({ eyebrow, title, message, confirmLabel, onConfirm }) {
   openFormDialog(
     `<form class="form-card">
-      <button type="button" class="dialog-close" data-dismiss aria-label="Fechar">×</button>
-      <span class="eyebrow">NOVA DESPESA</span><h2>O que entrou na conta?</h2><p>Dividimos o valor igualmente entre as pessoas do grupo.</p>
-      <label for="expense-description">Descrição</label><input id="expense-description" name="description" minlength="2" maxlength="100" placeholder="Ex.: Mercado da viagem" required autofocus>
-      <label for="expense-amount">Valor total (R$)</label><input id="expense-amount" name="amount" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" placeholder="0,00" required>
-      <label for="expense-paid-by">Quem pagou?</label><select id="expense-paid-by" name="paidBy" required>${members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select>
-      <p class="form-error" role="alert"></p><button class="button primary full" type="submit">Salvar despesa <span>→</span></button>
+      ${closeButton}
+      <span class="eyebrow">${eyebrow}</span><h2>${title}</h2><p>${message}</p>
+      <p class="form-error" role="alert"></p>
+      <div class="dialog-actions"><button type="button" class="button secondary" data-dismiss>Cancelar</button><button class="button danger" type="submit" autofocus>${confirmLabel}</button></div>
     </form>`,
-    async form => {
-      await post(`/api/groups/${state.activeGroupId}/expenses`, {
-        description: form.get('description'),
-        amount: form.get('amount'),
-        paidBy: Number(form.get('paidBy')),
-      });
-      toast('Despesa adicionada e dividida pelo grupo!');
+    onConfirm,
+  );
+}
+
+// ---------- despesas ----------
+
+function splitFieldset(members, expense) {
+  const mode = expense?.splitMode ?? 'equal';
+  const shareOf = new Map((expense?.shares ?? []).map(share => [share.memberId, share.amountCents]));
+  const included = id => !expense || shareOf.has(id);
+  const items = members
+    .map(
+      m => `<div class="split-item">
+        <label class="split-check"><input type="checkbox" name="equalMember" value="${m.id}" ${included(m.id) ? 'checked' : ''}><span>${escapeHtml(m.name)}</span></label>
+        <input class="split-amount" name="share-${m.id}" data-member="${m.id}" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00" aria-label="Valor de ${escapeHtml(m.name)}" value="${mode === 'exact' && shareOf.has(m.id) ? centsToInput(shareOf.get(m.id)) : ''}">
+      </div>`,
+    )
+    .join('');
+  return `<fieldset class="split-field" data-mode="${mode}">
+      <legend>Como dividir?</legend>
+      <div class="segmented">
+        <label><input type="radio" name="splitMode" value="equal" ${mode === 'equal' ? 'checked' : ''}><span>Igual</span></label>
+        <label><input type="radio" name="splitMode" value="exact" ${mode === 'exact' ? 'checked' : ''}><span>Valores exatos</span></label>
+      </div>
+      <div class="split-list">${items}</div>
+      <p class="split-hint" aria-live="polite"></p>
+    </fieldset>`;
+}
+
+// Converte o estado do formulário no contrato `split` da API.
+function readSplit(form) {
+  const mode = form.querySelector('[name="splitMode"]:checked').value;
+  if (mode === 'equal') {
+    return { mode, memberIds: [...form.querySelectorAll('[name="equalMember"]:checked')].map(input => Number(input.value)) };
+  }
+  const shares = [...form.querySelectorAll('.split-amount')]
+    .filter(input => input.value !== '')
+    .map(input => ({ memberId: Number(input.dataset.member), amount: input.value }));
+  return { mode, shares };
+}
+
+// Atualiza modo visível e resumo (valor por pessoa ou quanto falta distribuir).
+function bindSplitPreview(form) {
+  const fieldset = form.querySelector('.split-field');
+  const hint = form.querySelector('.split-hint');
+  const update = () => {
+    const split = readSplit(form);
+    const totalCents = toCents(form.elements.amount.value);
+    fieldset.dataset.mode = split.mode;
+    // Campos do modo inativo saem da validação nativa e do envio.
+    for (const input of form.querySelectorAll('.split-amount')) input.disabled = split.mode !== 'exact';
+    for (const input of form.querySelectorAll('[name="equalMember"]')) input.disabled = split.mode !== 'equal';
+    if (split.mode === 'equal') {
+      const count = split.memberIds.length;
+      hint.textContent = count
+        ? `${money(Math.floor(totalCents / count))} por pessoa · ${plural(count, 'pessoa', 'pessoas')}`
+        : 'Selecione quem divide.';
+      hint.dataset.state = count ? 'ok' : 'error';
+      return;
+    }
+    const diff = totalCents - split.shares.reduce((sum, share) => sum + toCents(share.amount), 0);
+    hint.textContent =
+      diff === 0 ? 'Valores fecham com o total ✓' : diff > 0 ? `Faltam ${money(diff)} para distribuir` : `Passou ${money(-diff)} do total`;
+    hint.dataset.state = diff === 0 ? 'ok' : 'error';
+  };
+  form.addEventListener('input', update);
+  update();
+}
+
+function openExpenseForm(members, expense = null) {
+  const editing = Boolean(expense);
+  const memberOptions = members
+    .map(m => `<option value="${m.id}" ${expense?.paidById === m.id ? 'selected' : ''}>${escapeHtml(m.name)}</option>`)
+    .join('');
+  const dialog = openFormDialog(
+    `<form class="form-card">
+      ${closeButton}
+      <span class="eyebrow">${editing ? 'EDITAR DESPESA' : 'NOVA DESPESA'}</span><h2>${editing ? 'Ajustar a despesa' : 'O que entrou na conta?'}</h2>
+      <p>${editing ? 'A alteração fica registrada no histórico.' : 'Divida igualmente ou informe quanto cabe a cada um.'}</p>
+      <label for="expense-description">Descrição</label><input id="expense-description" name="description" minlength="2" maxlength="100" placeholder="Ex.: Mercado da viagem" value="${escapeHtml(expense?.description ?? '')}" required autofocus>
+      <label for="expense-amount">Valor total (R$)</label><input id="expense-amount" name="amount" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" placeholder="0,00" value="${expense ? centsToInput(expense.amountCents) : ''}" required>
+      <label for="expense-paid-by">Quem pagou?</label><select id="expense-paid-by" name="paidBy" required>${memberOptions}</select>
+      ${splitFieldset(members, expense)}
+      <p class="form-error" role="alert"></p><button class="button primary full" type="submit">${editing ? 'Salvar alterações' : 'Salvar despesa'} <span>→</span></button>
+    </form>`,
+    async (formData, form) => {
+      const body = {
+        description: formData.get('description'),
+        amount: formData.get('amount'),
+        paidBy: Number(formData.get('paidBy')),
+        split: readSplit(form),
+      };
+      if (editing) await put(groupUrl(`/expenses/${expense.id}`), body);
+      else await post(groupUrl('/expenses'), body);
+      toast(editing ? 'Despesa atualizada!' : 'Despesa adicionada!');
       await loadSummary();
     },
   );
+  bindSplitPreview(dialog.querySelector('form'));
 }
+
+function confirmDeleteExpense(expense) {
+  confirmAction({
+    eyebrow: 'EXCLUIR DESPESA',
+    title: 'Excluir esta despesa?',
+    message: `"${escapeHtml(expense.description)}" (${money(expense.amountCents)}) sai dos saldos, mas continua no histórico.`,
+    confirmLabel: 'Excluir',
+    onConfirm: async () => {
+      await del(groupUrl(`/expenses/${expense.id}`));
+      toast('Despesa excluída.');
+      await loadSummary();
+    },
+  });
+}
+
+function historyEntry(event, nameOf) {
+  const { snapshot } = event;
+  const split =
+    snapshot.splitMode === 'exact' ? 'valores por pessoa' : `igual entre ${plural(snapshot.shares.length, 'pessoa', 'pessoas')}`;
+  return `<li class="history-item" data-action-type="${event.action}">
+    <div class="history-head"><strong>${HISTORY_LABELS[event.action]}</strong><span>${formatDateTime(event.createdAt)}</span></div>
+    <div class="history-body">${escapeHtml(snapshot.description)} · ${money(snapshot.amountCents)} · pago por ${escapeHtml(nameOf(snapshot.paidBy))} · ${split}</div>
+  </li>`;
+}
+
+async function openExpenseHistory(expense) {
+  try {
+    const events = await api(groupUrl(`/expenses/${expense.id}/history`));
+    const names = new Map(state.summary.members.map(m => [m.id, m.name]));
+    const nameOf = id => names.get(id) ?? 'pessoa removida';
+    openDialog(`<div class="form-card">
+      ${closeButton}
+      <span class="eyebrow">HISTÓRICO</span><h2>${escapeHtml(expense.description)}</h2><p>Cada criação, edição e exclusão fica registrada.</p>
+      <ol class="history-list">${events
+        .slice()
+        .reverse()
+        .map(event => historyEntry(event, nameOf))
+        .join('')}</ol>
+    </div>`);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function confirmUndoSettlement(settlement) {
+  confirmAction({
+    eyebrow: 'DESFAZER ACERTO',
+    title: 'Desfazer este acerto?',
+    message: `${escapeHtml(settlement.fromName)} → ${escapeHtml(settlement.toName)} (${money(settlement.amountCents)}). Os saldos voltam a considerar a dívida.`,
+    confirmLabel: 'Desfazer',
+    onConfirm: async () => {
+      await del(groupUrl(`/settlements/${settlement.id}`));
+      toast('Acerto desfeito.');
+      await loadSummary();
+    },
+  });
+}
+
+// Delegação: os botões são recriados a cada render, o listener não.
+const actions = {
+  'edit-expense': id =>
+    openExpenseForm(
+      state.summary.members,
+      state.summary.expenses.find(e => e.id === id),
+    ),
+  'expense-history': id => openExpenseHistory(state.summary.expenses.find(e => e.id === id)),
+  'delete-expense': id => confirmDeleteExpense(state.summary.expenses.find(e => e.id === id)),
+  'undo-settlement': id => confirmUndoSettlement(state.summary.settlements.find(s => s.id === id)),
+};
+
+// ---------- grupos e pessoas ----------
 
 function openMemberForm() {
   openFormDialog(
     `<form class="form-card">
-      <button type="button" class="dialog-close" data-dismiss aria-label="Fechar">×</button>
+      ${closeButton}
       <span class="eyebrow">MAIS UMA PESSOA</span><h2>Quem faltou no grupo?</h2><p>A pessoa entra nos próximos rateios do grupo.</p>
       <label for="member-name">Nome</label><input id="member-name" name="name" minlength="2" maxlength="50" placeholder="Nome da pessoa" required autofocus>
       <p class="form-error" role="alert"></p><button class="button primary full" type="submit">Adicionar pessoa <span>→</span></button>
     </form>`,
     async form => {
-      await post(`/api/groups/${state.activeGroupId}/members`, { name: form.get('name') });
+      await post(groupUrl('/members'), { name: form.get('name') });
       toast('Pessoa adicionada! Ela participa dos próximos rateios.');
       await loadGroups(state.activeGroupId);
     },
@@ -269,6 +463,10 @@ function openGroupDialog() {
 
 $('#new-group-open').addEventListener('click', openGroupDialog);
 $('[data-close-dialog]').addEventListener('click', () => $('#group-dialog').close());
+$('#content').addEventListener('click', event => {
+  const button = event.target.closest('[data-action]');
+  if (button && state.summary) actions[button.dataset.action]?.(Number(button.dataset.id));
+});
 $('#group-list').addEventListener('click', event => {
   const button = event.target.closest('[data-group]');
   if (button) selectGroup(Number(button.dataset.group));
