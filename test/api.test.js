@@ -1,47 +1,261 @@
-const { test, before, after } = require('node:test');
+'use strict';
+
+const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
-const { once } = require('node:events');
-const fs = require('node:fs/promises');
-const os = require('node:os');
-const path = require('node:path');
+const { openDatabase } = require('../src/db');
+const { createApp } = require('../src/app');
 
-let child, baseUrl, tempDir;
-before(async () => {
-  tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'contajusta-test-'));
-  const port = 20000 + Math.floor(Math.random() * 40000);
-  baseUrl = `http://127.0.0.1:${port}`;
-  child = spawn(process.execPath, ['server.js'], { cwd: path.resolve(__dirname, '..'), env: { ...process.env, PORT: String(port), DATABASE_PATH: path.join(tempDir, 'test.sqlite') }, stdio: 'ignore' });
-  for (let i = 0; i < 100; i++) {
-    if (child.exitCode !== null) throw new Error(`Server exited with code ${child.exitCode}`);
-    try { if ((await fetch(`${baseUrl}/api/groups`)).ok) return; } catch {}
-    await new Promise(resolve => setTimeout(resolve, 50));
+let server, baseUrl;
+
+test.before(async () => {
+  server = createApp(openDatabase(':memory:')).listen(0);
+  await new Promise(resolve => server.once('listening', resolve));
+  baseUrl = `http://127.0.0.1:${server.address().port}`;
+});
+test.after(() => server.close());
+
+async function request(method, url, body) {
+  const response = await fetch(baseUrl + url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: typeof body === 'string' ? body : body && JSON.stringify(body),
+  });
+  const text = await response.text();
+  return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : null };
+}
+
+const balanceOf = (summary, id) => summary.balances.find(b => b.id === id).balanceCents;
+
+async function createGroup(members = ['Ana', 'Bia', 'Caio']) {
+  const { status, body } = await request('POST', '/api/groups', { name: 'Viagem', members });
+  assert.equal(status, 201);
+  return body;
+}
+
+test('health check responde ok com cabeçalhos de segurança', async () => {
+  const { status, headers, body } = await request('GET', '/api/health');
+  assert.equal(status, 200);
+  assert.equal(body.status, 'ok');
+  assert.match(body.version, /^\d+\.\d+\.\d+$/);
+  assert.match(headers.get('x-request-id'), /^[0-9a-f-]{36}$/);
+  assert.equal(headers.get('cache-control'), 'no-store');
+  assert.match(headers.get('content-security-policy'), /default-src 'self'/);
+  assert.equal(headers.get('x-powered-by'), null);
+});
+
+test('cria grupo removendo nomes repetidos sem diferenciar maiúsculas', async () => {
+  const group = await createGroup(['Ana', 'ana ', 'Bia']);
+  assert.deepEqual(
+    group.members.map(m => m.name),
+    ['Ana', 'Bia'],
+  );
+  const list = await request('GET', `/api/groups?ids=${group.id}`);
+  assert.deepEqual(
+    list.body.map(g => [g.id, g.members.length]),
+    [[group.id, 2]],
+  );
+});
+
+test('grupos são privados: sem listagem global e sem acesso por id sequencial', async () => {
+  const group = await createGroup();
+  assert.match(group.id, /^[A-Za-z0-9_-]{22}$/);
+  assert.equal(group.rowId, undefined);
+  assert.deepEqual((await request('GET', '/api/groups')).body, []);
+  assert.deepEqual((await request('GET', '/api/groups?ids=chave-inexistente-123456')).body, []);
+  assert.equal((await request('GET', '/api/groups/1/summary')).status, 404);
+  const summary = await request('GET', `/api/groups/${group.id}/summary`);
+  assert.equal(summary.status, 200);
+  assert.equal(summary.body.group.id, group.id);
+  assert.equal(summary.body.group.rowId, undefined);
+});
+
+test('valida dados do grupo', async () => {
+  assert.equal((await request('POST', '/api/groups', { name: 'X', members: ['Ana', 'Bia'] })).status, 400);
+  assert.equal((await request('POST', '/api/groups', { name: 'Casa', members: ['Ana'] })).status, 400);
+});
+
+test('JSON malformado e grupo inexistente retornam erros em JSON', async () => {
+  const malformed = await request('POST', '/api/groups', '{oops');
+  assert.equal(malformed.status, 400);
+  assert.match(malformed.body.error, /JSON/);
+  for (const id of ['999', 'abc', '1.5', '-1']) {
+    assert.equal((await request('GET', `/api/groups/${id}/summary`)).status, 404);
   }
-  throw new Error('Test server did not become ready');
-});
-after(async () => {
-  if (child && child.exitCode === null) { child.kill(); await Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(resolve, 2000))]); }
-  if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
+  assert.equal((await request('GET', '/api/nada')).status, 404);
 });
 
-async function json(url, options) { const response = await fetch(baseUrl + url, { ...options, headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) } }); return { response, body: await response.json() }; }
+test('fluxo completo: despesa, saldos, sugestão e acerto', async () => {
+  const group = await createGroup();
+  const [ana, bia, caio] = group.members;
 
-test('creates groups, preserves cent-exact equal shares, and supports validated custom splits', async () => {
-  const created = await json('/api/groups', { method: 'POST', body: JSON.stringify({ name: 'Test trip', members: ['Alex', 'Sam'] }) });
-  assert.equal(created.response.status, 201);
-  const [alex, sam] = created.body.members;
+  const expense = await request('POST', `/api/groups/${group.id}/expenses`, { description: 'Jantar', amount: '100,00', paidBy: ana.id });
+  assert.equal(expense.status, 201);
+  assert.equal(expense.body.amountCents, 10000);
 
-  const equal = await json(`/api/groups/${created.body.id}/expenses`, { method: 'POST', body: JSON.stringify({ description: 'Odd-cent bill', amount: 10.01, paidBy: alex.id }) });
-  assert.equal(equal.response.status, 201);
-  assert.equal(equal.body.amountCents, 1001);
+  let summary = (await request('GET', `/api/groups/${group.id}/summary`)).body;
+  const balance = id => summary.balances.find(b => b.id === id);
+  assert.deepEqual([balance(ana.id).balanceCents, balance(bia.id).balanceCents, balance(caio.id).balanceCents], [6666, -3333, -3333]);
+  assert.equal(balance(ana.id).paidCents, 10000);
+  assert.equal(
+    summary.balances.reduce((sum, b) => sum + b.balanceCents, 0),
+    0,
+  );
+  assert.equal(summary.transfers.length, 2);
 
-  const invalid = await json(`/api/groups/${created.body.id}/expenses`, { method: 'POST', body: JSON.stringify({ description: 'Bad custom split', amount: 20, paidBy: alex.id, shares: [{ memberId: alex.id, amountCents: 500 }, { memberId: sam.id, amountCents: 501 }] }) });
-  assert.equal(invalid.response.status, 400);
-  assert.match(invalid.body.error, /soma das parcelas/i);
+  const transfer = summary.transfers[0];
+  const tooMuch = await request('POST', `/api/groups/${group.id}/settlements`, {
+    fromMember: transfer.fromId,
+    toMember: transfer.toId,
+    amountCents: transfer.amountCents + 1,
+  });
+  assert.equal(tooMuch.status, 400);
+  const settled = await request('POST', `/api/groups/${group.id}/settlements`, {
+    fromMember: transfer.fromId,
+    toMember: transfer.toId,
+    amountCents: transfer.amountCents,
+  });
+  assert.equal(settled.status, 201);
 
-  const custom = await json(`/api/groups/${created.body.id}/expenses`, { method: 'POST', body: JSON.stringify({ description: 'Custom dinner', amount: 20, paidBy: alex.id, shares: [{ memberId: alex.id, amountCents: 500 }, { memberId: sam.id, amountCents: 1500 }] }) });
-  assert.equal(custom.response.status, 201);
-  const summary = await json(`/api/groups/${created.body.id}/summary`);
-  assert.deepEqual(summary.body.balances.map(x => x.balanceCents), [2000, -2000]);
-  assert.equal(summary.body.expenses.reduce((sum, x) => sum + x.amountCents, 0), 3001);
+  summary = (await request('GET', `/api/groups/${group.id}/summary`)).body;
+  assert.equal(summary.transfers.length, 1);
+  assert.equal(summary.settlements.length, 1);
+});
+
+test('valida despesas', async () => {
+  const group = await createGroup();
+  const paidBy = group.members[0].id;
+  const post = body => request('POST', `/api/groups/${group.id}/expenses`, { description: 'Mercado', paidBy, ...body });
+  assert.equal((await post({ amount: 1.005 })).status, 400);
+  assert.equal((await post({ amount: 0 })).status, 400);
+  assert.equal((await post({ amount: 1000000.01 })).status, 400);
+  assert.equal((await post({ amount: 10, paidBy: 999999 })).status, 400);
+  assert.equal((await post({ amount: 10, description: 'x' })).status, 400);
+});
+
+test('pessoa nova participa só das despesas futuras e nomes não se repetem', async () => {
+  const group = await createGroup(['Ana', 'Bia']);
+  await request('POST', `/api/groups/${group.id}/expenses`, { description: 'Uber', amount: 20, paidBy: group.members[0].id });
+  const added = await request('POST', `/api/groups/${group.id}/members`, { name: 'Caio' });
+  assert.equal(added.status, 201);
+  assert.equal((await request('POST', `/api/groups/${group.id}/members`, { name: 'CAIO' })).status, 409);
+  const summary = (await request('GET', `/api/groups/${group.id}/summary`)).body;
+  assert.equal(summary.balances.find(b => b.id === added.body.id).balanceCents, 0);
+});
+
+test('divisão personalizada: subconjunto igual e valores exatos', async () => {
+  const group = await createGroup();
+  const [ana, bia, caio] = group.members;
+  const url = `/api/groups/${group.id}/expenses`;
+
+  const equal = await request('POST', url, {
+    description: 'Táxi',
+    amount: 30,
+    paidBy: ana.id,
+    split: { mode: 'equal', memberIds: [ana.id, bia.id] },
+  });
+  assert.equal(equal.status, 201);
+  const exact = await request('POST', url, {
+    description: 'Bar',
+    amount: '50,00',
+    paidBy: bia.id,
+    split: {
+      mode: 'exact',
+      shares: [
+        { memberId: caio.id, amount: '40,00' },
+        { memberId: bia.id, amount: 10 },
+      ],
+    },
+  });
+  assert.equal(exact.status, 201);
+
+  const summary = (await request('GET', `/api/groups/${group.id}/summary`)).body;
+  // Ana: +30 -15 = 15 | Bia: -15 +50 -10 = 25 | Caio: -40
+  assert.deepEqual([balanceOf(summary, ana.id), balanceOf(summary, bia.id), balanceOf(summary, caio.id)], [1500, 2500, -4000]);
+  assert.equal(summary.expenses.find(e => e.id === exact.body.id).splitMode, 'exact');
+
+  const wrongSum = await request('POST', url, {
+    description: 'Erro',
+    amount: 10,
+    paidBy: ana.id,
+    split: { mode: 'exact', shares: [{ memberId: ana.id, amount: 9 }] },
+  });
+  assert.equal(wrongSum.status, 400);
+  assert.equal(
+    (await request('POST', url, { description: 'Erro', amount: 10, paidBy: ana.id, split: { mode: 'equal', memberIds: [999] } })).status,
+    400,
+  );
+});
+
+test('edição e exclusão de despesa ficam registradas no histórico', async () => {
+  const group = await createGroup(['Ana', 'Bia']);
+  const [ana, bia] = group.members;
+  const base = `/api/groups/${group.id}/expenses`;
+  const { body: created } = await request('POST', base, { description: 'Hotel', amount: 200, paidBy: ana.id });
+
+  const updated = await request('PUT', `${base}/${created.id}`, { description: 'Hotel (2 noites)', amount: 300, paidBy: bia.id });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.amountCents, 30000);
+  assert.equal(balanceOf((await request('GET', `/api/groups/${group.id}/summary`)).body, bia.id), 15000);
+
+  assert.equal((await request('DELETE', `${base}/${created.id}`)).status, 204);
+  assert.equal((await request('DELETE', `${base}/${created.id}`)).status, 404);
+  assert.equal((await request('PUT', `${base}/${created.id}`, { description: 'X', amount: 1, paidBy: ana.id })).status, 404);
+
+  const summary = (await request('GET', `/api/groups/${group.id}/summary`)).body;
+  assert.equal(summary.expenses.length, 0);
+  assert.ok(summary.balances.every(b => b.balanceCents === 0));
+
+  const history = await request('GET', `${base}/${created.id}/history`);
+  assert.deepEqual(
+    history.body.map(e => e.action),
+    ['created', 'updated', 'deleted'],
+  );
+  assert.equal(history.body[0].snapshot.amountCents, 20000);
+  assert.equal(history.body[2].snapshot.paidBy, bia.id);
+});
+
+test('despesa de outro grupo não é acessível pela rota do grupo errado', async () => {
+  const a = await createGroup(['Ana', 'Bia']);
+  const b = await createGroup(['Caio', 'Duda']);
+  const { body } = await request('POST', `/api/groups/${a.id}/expenses`, { description: 'Pizza', amount: 50, paidBy: a.members[0].id });
+  assert.equal((await request('DELETE', `/api/groups/${b.id}/expenses/${body.id}`)).status, 404);
+  assert.equal((await request('GET', `/api/groups/${b.id}/expenses/${body.id}/history`)).status, 404);
+});
+
+test('acerto pode ser desfeito', async () => {
+  const group = await createGroup(['Ana', 'Bia']);
+  const [ana, bia] = group.members;
+  await request('POST', `/api/groups/${group.id}/expenses`, { description: 'Pizza', amount: 50, paidBy: ana.id });
+  const { body } = await request('POST', `/api/groups/${group.id}/settlements`, {
+    fromMember: bia.id,
+    toMember: ana.id,
+    amountCents: 2500,
+  });
+  assert.equal((await request('DELETE', `/api/groups/${group.id}/settlements/${body.id}`)).status, 204);
+  assert.equal((await request('DELETE', `/api/groups/${group.id}/settlements/${body.id}`)).status, 404);
+  assert.equal(balanceOf((await request('GET', `/api/groups/${group.id}/summary`)).body, bia.id), -2500);
+});
+
+test('contrato shares (centavos) exige uma parcela por pessoa', async () => {
+  const group = await createGroup(['Ana', 'Bia']);
+  const [ana, bia] = group.members;
+  const url = `/api/groups/${group.id}/expenses`;
+  const missing = await request('POST', url, {
+    description: 'Jantar',
+    amount: 20,
+    paidBy: ana.id,
+    shares: [{ memberId: ana.id, amountCents: 2000 }],
+  });
+  assert.equal(missing.status, 400);
+  const ok = await request('POST', url, {
+    description: 'Jantar',
+    amount: 20,
+    paidBy: ana.id,
+    shares: [
+      { memberId: ana.id, amountCents: 2000 },
+      { memberId: bia.id, amountCents: 0 },
+    ],
+  });
+  assert.equal(ok.status, 201);
+  assert.equal(balanceOf((await request('GET', `/api/groups/${group.id}/summary`)).body, bia.id), 0);
 });

@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      LOG_LEVEL: info
+      RATE_LIMIT_PER_MINUTE: 60
+    volumes:
+      - contajusta-data:/data
+    restart: unless-stopped
+
+volumes:
+  contajusta-data:
