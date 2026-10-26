@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Divida despesas em grupo sem perder a conta.",
-  "scripts": { "start": "node server.js", "dev": "node --watch server.js" },
+  "scripts": { "start": "node server.js", "dev": "node --watch server.js", "test": "node --test" },
   "engines": { "node": ">=20" },
   "dependencies": { "better-sqlite3": "^12.4.1", "express": "^5.1.0" }
 }

@@ -7,7 +7,7 @@ const app = express();
 const port = Number(process.env.PORT) || 3000;
 const dataDir = path.join(__dirname, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
-const db = new Database(path.join(dataDir, 'contajusta.sqlite'));
+const db = new Database(process.env.DATABASE_PATH || path.join(dataDir, 'contajusta.sqlite'));
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');
 db.exec(`
@@ -29,12 +29,11 @@ function groupMembers(id) { return db.prepare('SELECT id, name FROM members WHER
 function getBalances(groupId) {
   const members = groupMembers(groupId);
   const balance = new Map(members.map(member => [member.id, 0]));
-  const expenses = db.prepare(`SELECT e.paid_by, e.amount_cents, s.member_id, s.amount_cents AS share
-    FROM expenses e JOIN expense_splits s ON s.expense_id = e.id WHERE e.group_id = ?`).all(groupId);
-  for (const row of expenses) {
-    balance.set(row.paid_by, balance.get(row.paid_by) + row.amount_cents);
-    balance.set(row.member_id, balance.get(row.member_id) - row.share);
-  }
+  const expenses = db.prepare('SELECT paid_by, amount_cents FROM expenses WHERE group_id = ?').all(groupId);
+  for (const row of expenses) balance.set(row.paid_by, balance.get(row.paid_by) + row.amount_cents);
+  const shares = db.prepare(`SELECT s.member_id, s.amount_cents AS share
+    FROM expense_splits s JOIN expenses e ON e.id = s.expense_id WHERE e.group_id = ?`).all(groupId);
+  for (const row of shares) balance.set(row.member_id, balance.get(row.member_id) - row.share);
   const settlements = db.prepare('SELECT from_member, to_member, amount_cents FROM settlements WHERE group_id = ?').all(groupId);
   for (const row of settlements) {
     balance.set(row.from_member, balance.get(row.from_member) + row.amount_cents);
@@ -111,11 +110,22 @@ app.post('/api/groups/:id/expenses', (req, res) => {
   const amountCents = Math.round(amount * 100);
   if (amountCents < 1) return bad(res, 400, 'O valor mínimo é R$ 0,01.');
   const members = groupMembers(groupId);
-  const quotient = Math.floor(amountCents / members.length), remainder = amountCents % members.length;
+  let shares;
+  if (req.body?.shares !== undefined) {
+    if (!Array.isArray(req.body.shares) || req.body.shares.length !== members.length) return bad(res, 400, 'Informe uma parcela para cada pessoa do grupo.');
+    const byId = new Map(req.body.shares.map(share => [Number(share?.memberId), share?.amountCents]));
+    if (byId.size !== members.length || members.some(member => !byId.has(member.id))) return bad(res, 400, 'As parcelas devem incluir cada pessoa uma única vez.');
+    shares = members.map(member => ({ memberId: member.id, amountCents: byId.get(member.id) }));
+    if (shares.some(share => !Number.isSafeInteger(share.amountCents) || share.amountCents < 0)) return bad(res, 400, 'Cada parcela deve ser um valor inteiro de centavos igual ou maior que zero.');
+    if (shares.reduce((sum, share) => sum + share.amountCents, 0) !== amountCents) return bad(res, 400, 'A soma das parcelas precisa ser igual ao total da despesa.');
+  } else {
+    const quotient = Math.floor(amountCents / members.length), remainder = amountCents % members.length;
+    shares = members.map((member, index) => ({ memberId: member.id, amountCents: quotient + (index < remainder ? 1 : 0) }));
+  }
   const save = db.transaction(() => {
     const result = db.prepare('INSERT INTO expenses (group_id, paid_by, description, amount_cents) VALUES (?, ?, ?, ?)').run(groupId, paidBy, description, amountCents);
     const insertShare = db.prepare('INSERT INTO expense_splits (expense_id, member_id, amount_cents) VALUES (?, ?, ?)');
-    members.forEach((member, index) => insertShare.run(result.lastInsertRowid, member.id, quotient + (index < remainder ? 1 : 0)));
+    shares.forEach(share => insertShare.run(result.lastInsertRowid, share.memberId, share.amountCents));
     return result.lastInsertRowid;
   });
   res.status(201).json({ id: save(), amountCents });
