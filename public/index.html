@@ -4,8 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f6f5f1" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="description" content="Divida despesas em grupo sem perder a conta." />
     <title>ContaJusta — despesas compartilhadas, sem complicação</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ContaJusta" />
+    <meta property="og:title" content="ContaJusta — despesas compartilhadas, sem complicação" />
+    <meta
+      property="og:description"
+      content="Você foi convidado para dividir as contas do grupo. Veja quem pagou, quem deve e os acertos sugeridos."
+    />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script src="/theme.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,7 +30,10 @@
   <body>
     <header class="topbar">
       <a class="brand" href="/"><span class="brand-mark">cj</span> conta<span>justa</span></a>
-      <div class="topbar-right"><span class="secure-dot"></span> Seu grupo, suas contas</div>
+      <div class="topbar-right">
+        <span class="topbar-tagline"><span class="secure-dot"></span> Seu grupo, suas contas</span>
+        <button id="theme-toggle" class="icon-button theme-toggle" type="button" aria-label="Alternar tema"></button>
+      </div>
     </header>
     <main class="shell">
       <aside class="sidebar">

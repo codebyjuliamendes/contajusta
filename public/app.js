@@ -15,7 +15,17 @@ let toastTimer;
 // ---------- utilitários ----------
 
 async function api(url, options = {}) {
-  const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
+  let response;
+  try {
+    response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
+  } catch {
+    // fetch só rejeita em falha de rede.
+    throw new Error(
+      navigator.onLine
+        ? 'Não foi possível falar com o servidor. Tente de novo.'
+        : 'Você está offline. Conecte-se para ver e editar as contas.',
+    );
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Não foi possível concluir a ação.');
   return data;
@@ -337,6 +347,7 @@ function bindSplitPreview(form) {
     if (event.target.name !== 'splitMode' || event.target.value !== 'exact' || amounts.some(input => input.value !== '')) return;
     const ids = amounts.map(input => Number(input.dataset.member));
     const totalCents = toCents(form.elements.amount.value);
+    if (!totalCents) return;
     const quotient = Math.floor(totalCents / ids.length);
     const remainder = totalCents % ids.length;
     amounts.forEach((input, index) => (input.value = centsToInput(quotient + (index < remainder ? 1 : 0))));
@@ -355,6 +366,11 @@ function bindSplitPreview(form) {
         ? `${money(Math.floor(totalCents / count))} por pessoa · ${plural(count, 'pessoa', 'pessoas')}`
         : 'Selecione quem divide.';
       hint.dataset.state = count ? 'ok' : 'error';
+      return;
+    }
+    if (!totalCents) {
+      hint.textContent = 'Informe o valor total para distribuir.';
+      hint.dataset.state = 'error';
       return;
     }
     const diff = totalCents - split.shares.reduce((sum, share) => sum + toCents(share.amount), 0);
@@ -574,6 +590,19 @@ function boot() {
   });
 }
 
-boot().catch(error => {
-  $('#content').innerHTML = `<div class="welcome"><h1>Opa, algo deu errado</h1><p>${escapeHtml(error.message)}</p></div>`;
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
+function start() {
+  boot().catch(error => {
+    $('#content').innerHTML =
+      `<div class="welcome"><h1>Não consegui carregar</h1><p>${escapeHtml(error.message)}</p><button class="button secondary" id="retry-boot">Tentar de novo</button></div>`;
+    $('#retry-boot').addEventListener('click', start);
+  });
+}
+
+window.addEventListener('online', () => {
+  if (!state.summary) start();
 });
+start();

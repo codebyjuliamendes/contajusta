@@ -11,7 +11,8 @@ Aplicação full stack para dividir despesas de grupos com transparência. Crie 
 - Sugestão de transferências para quitar os saldos com menos acertos.
 - Registro de pagamentos feitos e atualização dos saldos, com opção de desfazer um acerto.
 - Banco SQLite local criado automaticamente na primeira execução.
-- Interface responsiva em português brasileiro.
+- Interface responsiva em português brasileiro, com tema claro/escuro (segue o sistema ou escolha manual).
+- Instalável como app (PWA): manifest, ícones e service worker com shell offline.
 
 ## Executar localmente
 
@@ -95,7 +96,7 @@ src/
   http/              # erros, segurança, request id/log de acesso, rate limit e validação
   routes/            # rotas por recurso: grupos, despesas e acertos
   domain/            # regras puras, sem I/O: dinheiro, divisão e acertos
-public/              # frontend estático (HTML, CSS e JS sem framework)
+public/              # frontend estático (HTML, CSS com tokens claro/escuro, JS sem framework, PWA)
 scripts/backup.js    # backup online do SQLite
 test/                # testes de domínio, API, migração, infra e servidor real
 ```
