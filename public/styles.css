@@ -23,3 +23,7 @@ body{background-color:var(--portfolio-canvas)}
 .badge,.pill,.tag{--accent-color:var(--portfolio-accent)}
 
 .brand-mark{background:var(--portfolio-accent)!important}.brand>span:last-child{color:var(--portfolio-accent)}
+
+/* Editorial navigation and restrained surfaces */
+body{background-image:none!important}.sidebar{position:static!important;height:auto!important;min-height:0!important}.sidebar-footer{position:static!important}
+.panel,.changes-panel,.history-panel,.ticket-column,.detail,.knowledge,.preview-panel{box-shadow:none!important}
