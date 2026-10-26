@@ -28,7 +28,7 @@
     else root.dataset.theme = mode;
     // Barra do navegador acompanha o fundo efetivo.
     const dark = mode === 'dark' || (mode === 'auto' && media.matches);
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111310' : '#f6f5f1');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#10121a' : '#f4f6fc');
     const button = document.getElementById('theme-toggle');
     if (button) {
       button.innerHTML = ICONS[mode];

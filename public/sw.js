@@ -1,8 +1,8 @@
 'use strict';
 
 // App shell offline. Assets sem hash: network-first, cache só como fallback. A API nunca é cacheada.
-const CACHE = 'contajusta-shell-v1';
-const SHELL = ['/', '/styles.css', '/app.js', '/theme.js', '/icon.svg', '/manifest.webmanifest'];
+const CACHE = 'contajusta-shell-v2';
+const SHELL = ['/', '/styles.css', '/app.js', '/theme.js', '/mark-cj.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
