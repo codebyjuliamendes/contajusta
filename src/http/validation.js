@@ -103,4 +103,14 @@ function parseExpenseInput(body, members) {
   return { description, paidBy, amountCents, splitMode: split.mode, shares: buildShares(amountCents, split, memberIds) };
 }
 
-module.exports = { MAX_MEMBERS, cleanText, nameKey, parseId, parseGroupKey, parseGroupKeys, parseMemberName, parseGroupInput, parseExpenseInput };
+module.exports = {
+  MAX_MEMBERS,
+  cleanText,
+  nameKey,
+  parseId,
+  parseGroupKey,
+  parseGroupKeys,
+  parseMemberName,
+  parseGroupInput,
+  parseExpenseInput,
+};
