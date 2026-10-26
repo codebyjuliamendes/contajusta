@@ -38,8 +38,23 @@ function parseGroupInput(body) {
   return { name, members };
 }
 
-// Ausente => divisão igual entre todo o grupo (compatível com clientes antigos).
-function parseSplit(raw, memberIds) {
+// shares: [{ memberId, amountCents }] no corpo; precisa cobrir cada pessoa do grupo uma vez.
+function parseLegacyShares(raw, memberIds) {
+  if (!Array.isArray(raw) || raw.length !== memberIds.length) throw new ValidationError('Informe uma parcela para cada pessoa do grupo.');
+  const shares = raw.map(share => ({ memberId: parseId(share?.memberId), amountCents: share?.amountCents }));
+  if (new Set(shares.map(s => s.memberId)).size !== memberIds.length || !memberIds.every(id => shares.some(s => s.memberId === id))) {
+    throw new ValidationError('As parcelas devem incluir cada pessoa uma única vez.');
+  }
+  if (shares.some(s => !Number.isSafeInteger(s.amountCents) || s.amountCents < 0)) {
+    throw new ValidationError('Cada parcela deve ser um valor inteiro de centavos igual ou maior que zero.');
+  }
+  return { mode: SPLIT_MODES.EXACT, shares };
+}
+
+// Ausente => divisão igual entre todo o grupo.
+function parseSplit(body, memberIds) {
+  const raw = body?.split;
+  if ((raw === undefined || raw === null) && body?.shares !== undefined) return parseLegacyShares(body.shares, memberIds);
   if (raw === undefined || raw === null) return { mode: SPLIT_MODES.EQUAL, memberIds };
 
   if (raw.mode === SPLIT_MODES.EQUAL) {
@@ -73,7 +88,7 @@ function parseExpenseInput(body, members) {
     throw new ValidationError('Informe um valor entre R$ 0,01 e R$ 1.000.000,00, com até duas casas decimais.');
   }
 
-  const split = parseSplit(body?.split, memberIds);
+  const split = parseSplit(body, memberIds);
   return { description, paidBy, amountCents, splitMode: split.mode, shares: buildShares(amountCents, split, memberIds) };
 }
 

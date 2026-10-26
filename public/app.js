@@ -310,12 +310,22 @@ function readSplit(form) {
 function bindSplitPreview(form) {
   const fieldset = form.querySelector('.split-field');
   const hint = form.querySelector('.split-hint');
+  const amounts = [...form.querySelectorAll('.split-amount')];
+  form.addEventListener('change', event => {
+    if (event.target.name !== 'splitMode' || event.target.value !== 'exact' || amounts.some(input => input.value !== '')) return;
+    const ids = amounts.map(input => Number(input.dataset.member));
+    const totalCents = toCents(form.elements.amount.value);
+    const quotient = Math.floor(totalCents / ids.length);
+    const remainder = totalCents % ids.length;
+    amounts.forEach((input, index) => (input.value = centsToInput(quotient + (index < remainder ? 1 : 0))));
+    update();
+  });
   const update = () => {
     const split = readSplit(form);
     const totalCents = toCents(form.elements.amount.value);
     fieldset.dataset.mode = split.mode;
     // Campos do modo inativo saem da validação nativa e do envio.
-    for (const input of form.querySelectorAll('.split-amount')) input.disabled = split.mode !== 'exact';
+    for (const input of amounts) input.disabled = split.mode !== 'exact';
     for (const input of form.querySelectorAll('[name="equalMember"]')) input.disabled = split.mode !== 'equal';
     if (split.mode === 'equal') {
       const count = split.memberIds.length;

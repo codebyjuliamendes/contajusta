@@ -216,3 +216,27 @@ test('acerto pode ser desfeito', async () => {
   assert.equal((await request('DELETE', `/api/groups/${group.id}/settlements/${body.id}`)).status, 404);
   assert.equal(balanceOf((await request('GET', `/api/groups/${group.id}/summary`)).body, bia.id), -2500);
 });
+
+test('contrato shares (centavos) exige uma parcela por pessoa', async () => {
+  const group = await createGroup(['Ana', 'Bia']);
+  const [ana, bia] = group.members;
+  const url = `/api/groups/${group.id}/expenses`;
+  const missing = await request('POST', url, {
+    description: 'Jantar',
+    amount: 20,
+    paidBy: ana.id,
+    shares: [{ memberId: ana.id, amountCents: 2000 }],
+  });
+  assert.equal(missing.status, 400);
+  const ok = await request('POST', url, {
+    description: 'Jantar',
+    amount: 20,
+    paidBy: ana.id,
+    shares: [
+      { memberId: ana.id, amountCents: 2000 },
+      { memberId: bia.id, amountCents: 0 },
+    ],
+  });
+  assert.equal(ok.status, 201);
+  assert.equal(balanceOf((await request('GET', `/api/groups/${group.id}/summary`)).body, bia.id), 0);
+});

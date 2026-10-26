@@ -35,7 +35,7 @@ Abra <http://localhost:3000>. Os dados ficam em `data/contajusta.sqlite`, que n�
 
 ```bash
 npm run dev           # servidor com recarga automática
-npm test              # testes unitários e de API (node:test)
+npm test              # testes de domínio, API, migração e do servidor real (node:test)
 npm run lint          # ESLint
 npm run format        # Prettier
 npm run check         # lint + formatação + testes (o mesmo que roda no CI)
@@ -84,6 +84,7 @@ test/                # testes de domínio e de integração da API
   - `split` é opcional (padrão: igual entre todos).
   - Igual entre parte do grupo: `{ "mode": "equal", "memberIds": [1, 2] }`.
   - Valores exatos: `{ "mode": "exact", "shares": [{ "memberId": 1, "amount": "70,00" }, { "memberId": 2, "amount": 50.5 }] }`.
+  - Também aceita `shares: [{ "memberId": 1, "amountCents": 6000 }, ...]` na raiz do corpo, com uma parcela para cada pessoa do grupo.
 - `GET /api/groups/:id/expenses/:expenseId` — detalhe da despesa com as parcelas.
 - `PUT /api/groups/:id/expenses/:expenseId` — edita a despesa (mesmo corpo do `POST`).
 - `DELETE /api/groups/:id/expenses/:expenseId` — exclui a despesa (exclusão lógica).

@@ -43,7 +43,7 @@ function buildShares(amountCents, split, groupMemberIds) {
     const shares = split.shares.filter(share => share.amountCents > 0);
     if (!shares.length) throw new ValidationError('Informe o valor de ao menos uma pessoa.');
     const total = shares.reduce((sum, share) => sum + share.amountCents, 0);
-    if (total !== amountCents) throw new ValidationError('A soma das partes precisa ser igual ao valor total.');
+    if (total !== amountCents) throw new ValidationError('A soma das parcelas precisa ser igual ao valor total.');
     return shares;
   }
 

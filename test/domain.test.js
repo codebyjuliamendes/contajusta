@@ -94,7 +94,7 @@ test('buildShares: valores exatos precisam fechar o total', () => {
       { memberId: 2, amountCents: 30 },
     ],
   );
-  assert.throws(() => buildShares(100, exact([{ memberId: 1, amountCents: 99 }]), [1, 2]), /soma/);
+  assert.throws(() => buildShares(100, exact([{ memberId: 1, amountCents: 99 }]), [1, 2]), /soma das parcelas/);
   assert.throws(() => buildShares(100, exact([{ memberId: 9, amountCents: 100 }]), [1, 2]), /não está no grupo/);
   assert.throws(
     () =>
